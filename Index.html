@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AMR Terminal App - Interactive & Auto-Reminder</title>
+  <title>AMR Terminal App - Direct Telegram Callback</title>
 
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
@@ -49,13 +49,13 @@
       <div class="header-title">AMR Terminal App</div>
       <div class="wh-badge">WHS001</div>
     </div>
-    <div class="subtitle">Smart Logistics & Auto-Reminder Engine</div>
+    <div class="subtitle">Telegram Group Interactive Callback System</div>
   </div>
 
   <!-- Dispatcher Control -->
   <div class="card">
     <div class="status-box">
-      🟢 系統運行中 (支援取貨/退貨按鈕與超時自動催促)
+      🟢 系統運行中 (使用群組內置 Callback 按鈕)
     </div>
 
     <h2>選擇目標部門 (Destination)</h2>
@@ -72,7 +72,7 @@
       <option value="Frozen (冷凍貨)">Frozen (冷凍貨)</option>
     </select>
 
-    <button class="btn-success" onclick="triggerDispatchWithButtonsAndReminder()">🚀 啟動任務並啟用超時催促監控</button>
+    <button class="btn-success" onclick="triggerDispatchWithCallbacks()">🚀 啟動任務並發送群組反饋掣</button>
   </div>
 
 </div>
@@ -95,13 +95,10 @@ const DEPT_CHAT_IDS = {
   "Housekeeping": "-5376156300"
 };
 
-// 全域計時器變數（防止重複）
-let reminderTimer = null;
-
 /**
- * 啟動任務：發送初始 Telegram 通知（含按鈕）並啟動定時追擊機制
+ * 啟動任務：發送 Telegram 訊息並附帶 callback_data 互動按鈕
  */
-function triggerDispatchWithButtonsAndReminder() {
+function triggerDispatchWithCallbacks() {
   const targetDept = document.getElementById("targetDeptSelect").value;
   const goodsType = document.getElementById("goodsTypeSelect").value;
   const missionId = "MS-" + Math.floor(1000 + Math.random() * 9000);
@@ -110,10 +107,10 @@ function triggerDispatchWithButtonsAndReminder() {
 
   const btn = event.target;
   const originalText = btn.innerText;
-  btn.innerText = "⏳ 正在發送任務並啟動監控...";
+  btn.innerText = "⏳ 正在發送群組互動通知...";
   btn.disabled = true;
 
-  // A. 寫入 Firebase 實時狀態
+  // A. 寫入 Firebase
   const firebasePromise = db.ref('amr_missions/' + targetDept).set({
     status: 'ARRIVED',
     missionId: missionId,
@@ -121,20 +118,20 @@ function triggerDispatchWithButtonsAndReminder() {
     timeStr: nowStr
   });
 
-  // B. 組合 Telegram 訊息及互動按鈕（確認已取貨 / 貨物不滿意退貨）
+  // B. 設定 Telegram 內置 Callback 按鈕 (使用 callback_data 代替 url)
   const targetChatId = DEPT_CHAT_IDS[targetDept] || "-5376156300";
   const messageText = `🚨 <b>【AMR 到貨提醒】</b>\n\n` +
                       `📍 <b>目標部門:</b> ${targetDept}\n` +
                       `📦 <b>任務編號:</b> ${missionId}\n` +
                       `🏬 <b>出發來源:</b> ${origin} (${goodsType})\n` +
                       `⏰ <b>出發時間:</b> ${nowStr}\n\n` +
-                      `請部門人員檢查貨品後，點擊下方對應按鈕：`;
+                      `請直接點擊下方按鈕進行反饋：`;
 
   const replyMarkup = {
     inline_keyboard: [
       [
-        { text: "✅ 確認已取貨", url: "https://ioktengcheong.github.io/amr-002/Index.html" },
-        { text: "❌ 貨物不滿意退貨", url: "https://ioktengcheong.github.io/amr-002/Index.html" }
+        { text: "✅ 確認已取貨", callback_data: `confirm_${missionId}` },
+        { text: "❌ 貨物不滿意退貨", callback_data: `return_${missionId}` }
       ]
     ]
   };
@@ -150,7 +147,6 @@ function triggerDispatchWithButtonsAndReminder() {
     })
   });
 
-  // 等待兩者處理完成
   Promise.all([firebasePromise, telegramPromise])
   .then(([_, tgRes]) => tgRes.json())
   .then(tgData => {
@@ -158,9 +154,7 @@ function triggerDispatchWithButtonsAndReminder() {
     btn.disabled = false;
 
     if (tgData.ok) {
-      alert(`[成功] 任務 ${missionId} 已發送！若未確認將自動啟動超時追擊提醒。`);
-      // 啟動定時未確認重試監控
-      startAutoReminderLoop(missionId, targetDept);
+      alert(`[成功] 任務 ${missionId} 已發送！按鈕已轉為 Telegram 內置群組反饋模式。`);
     } else {
       alert("[發送出錯]: " + JSON.stringify(tgData));
     }
@@ -169,71 +163,6 @@ function triggerDispatchWithButtonsAndReminder() {
     btn.innerText = originalText;
     btn.disabled = false;
     alert("[網絡錯誤]: " + err);
-  });
-}
-
-/**
- * 自動超時追擊提醒機制
- */
-function startAutoReminderLoop(missionId, targetDept) {
-  if (reminderTimer) clearInterval(reminderTimer);
-
-  let retryCount = 0;
-  const maxRetries = 3; // 最多自動催促 3 次
-
-  // 設定每隔 30 秒檢查一次（實戰中可改為 300000 即 5 分鐘）
-  reminderTimer = setInterval(() => {
-    retryCount++;
-    
-    db.ref('amr_missions/' + targetDept).once('value', (snapshot) => {
-      const data = snapshot.val();
-      
-      // 如果狀態已經變成已確認或已退貨（即代表有人處理左），就停止催促
-      if (data && (data.status === 'CONFIRMED' || data.status === 'RETURNED')) {
-        clearInterval(reminderTimer);
-        console.log("任務已獲處理，停止自動催促。");
-        return;
-      }
-
-      // 如果未夠最大催促次數，發送緊急催促訊息
-      if (retryCount <= maxRetries) {
-        sendUrgentReminderMessage(targetDept, missionId, retryCount);
-      } else {
-        clearInterval(reminderTimer);
-      }
-    });
-
-  }, 30000); 
-}
-
-/**
- * 發送超時催促訊息到 Telegram
- */
-function sendUrgentReminderMessage(targetDept, missionId, count) {
-  const targetChatId = DEPT_CHAT_IDS[targetDept] || "-5376156300";
-  const urgentText = `⚠️ <b>【AMR 超時未取貨警告 #${count}】</b>\n\n` +
-                     `📍 <b>目標部門:</b> ${targetDept}\n` +
-                     `📦 <b>任務編號:</b> ${missionId}\n\n` +
-                     `部 AMR 已經到達好耐，但<b>尚未收到確認</b>！請儘快處理：`;
-
-  const replyMarkup = {
-    inline_keyboard: [
-      [
-        { text: "✅ 確認已取貨", url: "https://ioktengcheong.github.io/amr-002/Index.html" },
-        { text: "❌ 貨物不滿意退貨", url: "https://ioktengcheong.github.io/amr-002/Index.html" }
-      ]
-    ]
-  };
-
-  fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: targetChatId,
-      text: urgentText,
-      parse_mode: "HTML",
-      reply_markup: replyMarkup
-    })
   });
 }
 </script>
