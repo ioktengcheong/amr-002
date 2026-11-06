@@ -1,42 +1,72 @@
-<!DOCTYPE html>
-<html lang="zh-Hant">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AMR Autonomous Dispatcher (Spy Mode)</title>
+<!DOCTYPE html>  
+<html lang="zh-Hant">  
+<head>  
+  <meta charset="UTF-8">  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">  
+  <title>Warehouse Control Tower App - Smart Logistics</title>  
+  <script src="https://cdn.tailwindcss.com"></script>  
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">  
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 p-4 min-h-screen flex items-center justify-center">
+  <style>.touch-btn { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }</style>  
+</head>  
+<body class="bg-gray-100 min-h-screen p-4 text-gray-800">  
+  
+  <div class="max-w-2xl mx-auto space-y-4">  
+    <!-- Header -->  
+    <div class="bg-gray-900 text-white p-5 rounded-2xl shadow-md flex justify-between items-center">  
+      <div>  
+        <h1 class="text-xl font-black">Warehouse Control Tower</h1>  
+        <p class="text-xs text-gray-400">專用：倉務全局車隊、Escalation 與 Spy 狀態監控</p>  
+      </div>  
+      <i class="fa-solid fa-tower-observation text-2xl text-blue-400"></i>  
+    </div>  
+  
+    <!-- Global KPIs -->  
+    <div class="grid grid-cols-3 gap-3 text-center">  
+      <div class="bg-white p-4 rounded-xl border shadow-sm">  
+        <div class="text-xs text-gray-500 font-bold">活躍派送 (Active)</div>  
+        <div class="text-xl font-black text-blue-600 mt-1" id="kpiActive">0</div>  
+      </div>  
+      <div class="bg-white p-4 rounded-xl border shadow-sm">  
+        <div class="text-xs text-gray-500 font-bold">已確認收貨</div>  
+        <div class="text-xl font-black text-emerald-600 mt-1" id="kpiConfirmed">0</div>  
+      </div>  
+      <div class="bg-white p-4 rounded-xl border shadow-sm">  
+        <div class="text-xs text-gray-500 font-bold">異常 / 阻擋</div>  
+        <div class="text-xl font-black text-rose-600 mt-1" id="kpiFailures">0</div>  
+      </div>  
+    </div>  
 
-  <div class="max-w-md w-full bg-white p-6 rounded-2xl shadow-md space-y-4">
-    <h1 class="text-lg font-black text-gray-950 border-b pb-2">AMR 全自動物流發車與背景監控</h1>
-    
-    <div>
-      <label class="text-xs font-bold text-gray-600">目標部門 (Destination)</label>
-      <select id="targetDept" class="w-full p-3 border rounded-xl mt-1 text-sm">
-        <option value="RC Cafe">RC Cafe</option>
-        <option value="Staff Canteen">Staff Canteen</option>
-        <option value="Housekeeping">Housekeeping</option>
-      </select>
+    <!-- Control Tower 異常控制面板 -->
+    <div class="bg-white p-5 rounded-2xl border space-y-3 shadow-sm">
+      <h2 class="text-xs font-bold text-gray-700 uppercase tracking-wider border-b pb-2">
+        <i class="fa-solid fa-triangle-exclamation text-rose-600"></i> AMR 突發狀況與異常廣播
+      </h2>
+      <div class="flex gap-2">
+        <input type="text" id="exceptionMissionId" placeholder="輸入任務編號 (例如 MS-4394)" class="flex-1 p-3 border rounded-xl text-xs">
+        <button onclick="broadcastException('BLOCKED', '路障阻擋 / 需人工介入')" class="bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-3 rounded-xl text-xs shadow">
+          🚨 標記受阻
+        </button>
+        <button onclick="broadcastException('FAILED_5MIN', '運送異常 / 任務失敗')" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-4 py-3 rounded-xl text-xs shadow">
+          ⚠️ 標記失敗
+        </button>
+      </div>
     </div>
-
-    <div>
-      <label class="text-xs font-bold text-gray-600">貨品 / 溫層 (Goods Type)</label>
-      <select id="goodsType" class="w-full p-3 border rounded-xl mt-1 text-sm">
-        <option value="Chilled (冷藏貨)">Chilled (冷藏貨)</option>
-        <option value="Frozen (冷凍貨)">Frozen (冷凍貨)</option>
-        <option value="Ambient (常溫貨)">Ambient (常溫貨)</option>
-      </select>
-    </div>
-
-    <button onclick="dispatchMission()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold p-3 rounded-xl shadow">
-      🚀 啟動任務 (自動化 Spy 監控啟動)
-    </button>
-  </div>
-
-  <script>
+  
+    <!-- Live Event Feed -->  
+    <div class="bg-white p-5 rounded-2xl border space-y-3 shadow-sm">  
+      <h2 class="text-xs font-bold text-gray-700 uppercase tracking-wider border-b pb-2">  
+        <i class="fa-solid fa-list-check text-blue-600"></i> 全局實時任務動態 (Cloud Real-time Audit Log)  
+      </h2>  
+      <div id="logContainer" class="space-y-2">  
+        <div class="text-center py-6 text-xs text-gray-400">正在連接雲端資料庫載入數據...</div>  
+      </div>  
+    </div>  
+  </div>  
+  
+  <script>  
+    // Firebase 設定
     const firebaseConfig = {
       databaseURL: "https://amr-logistics-system-default-rtdb.asia-southeast1.firebasedatabase.app/"
     };
@@ -46,94 +76,103 @@
     const TELEGRAM_BOT_TOKEN = "9157691891:AAEAKmuToYTM1xu6K4ZNn7KbW6X7AFXql4g";
     const CHAT_ID = "-5376156300";
 
-    function dispatchMission() {
-      const dept = document.getElementById('targetDept').value;
-      const goods = document.getElementById('goodsType').value;
-      const missionId = "MS-" + Math.floor(1000 + Math.random() * 9000);
-      const timestamp = Date.now();
+    let activeTasks = {};  
+  
+    window.onload = function() {  
+      // 實時監聽雲端 Firebase 數據變化
+      db.ref('amr_missions').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          activeTasks = data;
+          renderDashboard();
+        } else {
+          activeTasks = {};
+          renderDashboard();
+        }
+      });
+    };  
 
-      // 1. 寫入 Firebase (Control Tower 及背景 Spy 共同監視的來源)
-      db.ref('amr_missions/' + missionId).set({
-        amr: "AMR-01",
-        targetBu: dept,
-        goodsType: goods,
-        status: 'ARRIVED',
+    // 管理層發起異常廣播並即時推播至 Telegram
+    function broadcastException(statusType, description) {
+      const missionId = document.getElementById('exceptionMissionId').value.trim();
+      if (!missionId) {
+        alert("請先輸入對應的任務編號！");
+        return;
+      }
+
+      const timestamp = Date.now();
+      
+      // 更新 Firebase 狀態
+      db.ref('amr_missions/' + missionId).update({
+        status: statusType,
+        errorNote: description,
         timestamp: timestamp
       });
 
-      // 同步本地廣播 (兼容你分享的 Control Tower)
-      localStorage.setItem('amr_event_broadcast', JSON.stringify({
-        amr: "AMR-01", targetBu: dept, goodsType: goods, status: 'ARRIVED', timestamp: timestamp
-      }));
-
-      // 2. 發送 Telegram 到貨通知（帶有真按鈕 Callback）
-      const text = `🚨 <b>【AMR 到貨提醒】</b>\n\n📍 <b>目標部門:</b> ${dept}\n📦 <b>任務編號:</b> ${missionId}\n🧊 <b>類別:</b> ${goods}\n\n請點擊下方按鈕進行反饋：`;
-      const replyMarkup = {
-        inline_keyboard: [[
-          { text: "✅ 確認已取貨", callback_data: `confirm_${missionId}` },
-          { text: "❌ 貨物不滿意退貨", callback_data: `return_${missionId}` }
-        ]]
-      };
+      // 發送緊急 Telegram 警報
+      const alertText = `🚨 <b>【Control Tower 異常警報】</b>\n\n` +
+                        `📦 <b>任務編號:</b> ${missionId}\n` +
+                        `⚠️ <b>狀況描述:</b> ${description}\n` +
+                        `⏰ <b>發生時間:</b> ${new Date().toLocaleTimeString()}\n\n` +
+                        `<i>請現場維護人員即時處理！</i>`;
 
       fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: CHAT_ID, text: text, parse_mode: "HTML", reply_markup: replyMarkup })
+        body: JSON.stringify({ chat_id: CHAT_ID, text: alertText, parse_mode: "HTML" })
       })
       .then(res => res.json())
       .then(data => {
         if (data.ok) {
-          alert(`任務 ${missionId} 發送成功！背景 Spy 自動監控與超時催促已啟動。`);
-          
-          // 3. 啟動「背景 Spy 隱形監控與自動重試迴圈」
-          startBackgroundSpyLoop(missionId, dept);
+          alert(`已成功發送任務 ${missionId} 的異常警報到 Telegram！`);
+          document.getElementById('exceptionMissionId').value = '';
         }
       });
     }
+  
+    function renderDashboard() {  
+      const keys = Object.keys(activeTasks);  
+      let activeCount = 0;
+      let confirmedCount = 0;
+      let failureCount = 0;
 
-    /**
-     * 背景 Spy 自動化監控：
-     * 自動在背景「靜靜望住」Firebase，若夠鐘無人確認，自動發 Telegram 轟炸；
-     * 一旦有人在 Telegram 撳了掣（狀態變 CONFIRMED / RETURNED），Spy 自動收手解除警告。
-     */
-    function startBackgroundSpyLoop(missionId, dept) {
-      let retryCount = 0;
-      const maxRetries = 3; // 最多自動催促 3 次
+      keys.forEach(k => {
+        const item = activeTasks[k];
+        if (item.status === 'ARRIVED') activeCount++;
+        if (item.status === 'CONFIRMED') confirmedCount++;
+        if (item.status === 'FAILED_5MIN' || item.status === 'BLOCKED') failureCount++;
+      });
 
-      const spyInterval = setInterval(() => {
-        // 背景讀取該任務最新狀態
-        db.ref('amr_missions/' + missionId).once('value', (snapshot) => {
-          const val = snapshot.val();
+      document.getElementById('kpiActive').innerText = activeCount;  
+      document.getElementById('kpiConfirmed').innerText = confirmedCount;  
+      document.getElementById('kpiFailures').innerText = failureCount;  
+  
+      const container = document.getElementById('logContainer');  
+      if (keys.length === 0) {
+        container.innerHTML = '<div class="text-center py-6 text-xs text-gray-400">目前沒有活躍任務</div>';
+        return;
+      }
 
-          // 情況 A：如果任務不存在，或者已經被領取/退貨 (CONFIRMED / RETURNED)
-          if (!val || val.status === 'CONFIRMED' || val.status === 'RETURNED') {
-            clearInterval(spyInterval);
-            console.log(`[Spy] 任務 ${missionId} 已獲處理或完成，背景自動監控安全退出。`);
-            return;
-          }
+      container.innerHTML = keys.map(k => {  
+        const item = activeTasks[k];  
+        let statusBg = 'bg-blue-100 text-blue-800';
+        if (item.status === 'ARRIVED') statusBg = 'bg-amber-100 text-amber-800';
+        if (item.status === 'CONFIRMED') statusBg = 'bg-emerald-100 text-emerald-800';
+        if (item.status === 'FAILED_5MIN' || item.status === 'BLOCKED') statusBg = 'bg-rose-600 text-white';
 
-          // 情況 B：夠鐘仍未有人理，且未超過最大重試次數 ➔ 自動發起 Telegram 催促！
-          if (retryCount < maxRetries) {
-            retryCount++;
-            console.log(`[Spy] 任務 ${missionId} 超時未確認，正在發動第 ${retryCount} 次自動提醒...`);
-            
-            fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: CHAT_ID,
-                text: `⚠️ <b>【Spy 自動化超時警告 #${retryCount}】</b>\n部門 <b>${dept}</b> 尚未確認領取任務 <code>${missionId}</code>，請儘快處理！`,
-                parse_mode: "HTML"
-              })
-            });
-          } else {
-            // 超過次數，停止背景 Spy
-            clearInterval(spyInterval);
-          }
-        });
-
-      }, 30000); // 測試用 30 秒（實戰生產環境可改為 300000 即 5 分鐘）
-    }
-  </script>
-</body>
-</html>
+        return `  
+          <div class="p-3 rounded-xl border flex justify-between items-center text-xs ${item.status === 'FAILED_5MIN' || item.status === 'BLOCKED' ? 'bg-rose-50 border-rose-200' : 'bg-gray-50'}">  
+            <div>  
+              <div class="font-bold text-gray-950">${item.amr || 'AMR-01'} ➔ ${item.targetBu || '未知部門'} (${item.goodsType || 'Normal'}) [${k}]</div>  
+              <div class="text-[10px] text-gray-500">時間: ${new Date(item.timestamp).toLocaleTimeString()} ${item.errorNote ? ' | 備註: ' + item.errorNote : ''}</div>  
+            </div>  
+            <span class="font-mono font-bold px-2.5 py-1 rounded text-xs ${statusBg}">  
+              ${item.status}  
+            </span>  
+          </div>  
+        `;  
+      }).reverse().join('');  
+    }  
+  </script>  
+</body>  
+</html>  
