@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AMR Terminal App - Telemetry & Tele Push</title>
+  <title>AMR Terminal App - Interactive Telegram Bot</title>
 
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
@@ -49,13 +49,13 @@
       <div class="header-title">AMR Terminal App</div>
       <div class="wh-badge">WHS001</div>
     </div>
-    <div class="subtitle">AutoXing API Spy, Firebase Sync & Telegram Push</div>
+    <div class="subtitle">Interactive Buttons & Firebase Sync</div>
   </div>
 
   <!-- Dispatcher Control -->
   <div class="card">
     <div class="status-box">
-      🟢 AutoXing & Firebase 雙向監控中 (Active)
+      🟢 互動按鈕與雲端雙向連線就緒
     </div>
 
     <h2>選擇目標部門 (Destination)</h2>
@@ -72,7 +72,7 @@
       <option value="Frozen (冷凍貨)">Frozen (冷凍貨)</option>
     </select>
 
-    <button class="btn-success" onclick="triggerDispatchAndSync()">🚀 啟動任務 (同步 Firebase + Telegram 推播)</button>
+    <button class="btn-success" onclick="triggerDispatchWithButtons()">🚀 啟動任務並發送帶按鈕的通知</button>
   </div>
 
 </div>
@@ -89,8 +89,6 @@ const db = firebase.database();
 
 // ==================== 2. Telegram Bot 設定 ====================
 const TELEGRAM_BOT_TOKEN = "9157691891:AAEAKmuToYTM1xu6K4ZNn7KbW6X7AFXql4g";
-
-// 各部門對應的 Telegram Group Chat ID (已更新為真實 ID)
 const DEPT_CHAT_IDS = {
   "RC Cafe": "-5376156300",
   "Staff Canteen": "-5376156300",
@@ -98,9 +96,9 @@ const DEPT_CHAT_IDS = {
 };
 
 /**
- * 觸發任務：同時寫入 Firebase 實時狀態 + 發送 Telegram 手機通知
+ * 觸發任務：發送 Telegram 訊息並附加「確認收貨」互動按鈕
  */
-function triggerDispatchAndSync() {
+function triggerDispatchWithButtons() {
   const targetDept = document.getElementById("targetDeptSelect").value;
   const goodsType = document.getElementById("goodsTypeSelect").value;
   const missionId = "MS-" + Math.floor(1000 + Math.random() * 9000);
@@ -109,10 +107,10 @@ function triggerDispatchAndSync() {
 
   const btn = event.target;
   const originalText = btn.innerText;
-  btn.innerText = "⏳ 正在處理同步與發送...";
+  btn.innerText = "⏳ 正在發送帶按鈕的通知...";
   btn.disabled = true;
 
-  // A. 寫入 Firebase (供各部門 Terminal / Spy 畫面實時監控)
+  // A. 寫入 Firebase
   const firebasePromise = db.ref('amr_missions/' + targetDept).set({
     status: 'ARRIVED',
     missionId: missionId,
@@ -120,14 +118,24 @@ function triggerDispatchAndSync() {
     timeStr: nowStr
   });
 
-  // B. 發送 Telegram 訊息 (供部門員工手機直接彈出 Sound & Push Notification)
+  // B. 組合 Telegram 訊息及 Inline Keyboard 按鈕
   const targetChatId = DEPT_CHAT_IDS[targetDept] || "-5376156300";
   const messageText = `🚨 <b>【AMR 到貨提醒】</b>\n\n` +
                       `📍 <b>目標部門:</b> ${targetDept}\n` +
                       `📦 <b>任務編號:</b> ${missionId}\n` +
                       `🏬 <b>出發來源:</b> ${origin} (${goodsType})\n` +
                       `⏰ <b>出發時間:</b> ${nowStr}\n\n` +
-                      `請部門相關人員儘速前往完成取貨作業！`;
+                      `請到達後點擊下方按鈕確認：`;
+
+  // 設定 Telegram 互動按鈕 (reply_markup)
+  const replyMarkup = {
+    inline_keyboard: [
+      [
+        { text: "✅ 確認已取貨 (Acknowledge)", callback_data: `ack_${missionId}` },
+        { text: "🔄 要求再派送 (Resend)", callback_data: `resend_${missionId}` }
+      ]
+    ]
+  };
 
   const telegramPromise = fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: "POST",
@@ -135,11 +143,12 @@ function triggerDispatchAndSync() {
     body: JSON.stringify({
       chat_id: targetChatId,
       text: messageText,
-      parse_mode: "HTML"
+      parse_mode: "HTML",
+      reply_markup: replyMarkup
     })
   });
 
-  // 等待兩者處理完成
+  // 等待兩者完成
   Promise.all([firebasePromise, telegramPromise])
   .then(([_, tgRes]) => tgRes.json())
   .then(tgData => {
@@ -147,15 +156,15 @@ function triggerDispatchAndSync() {
     btn.disabled = false;
 
     if (tgData.ok) {
-      alert(`[成功] 任務 ${missionId} 已同步至 Firebase 數據庫，並成功推送至 [${targetDept}] Telegram 群組！`);
+      alert(`[成功] 任務 ${missionId} 已發送，Telegram 訊息下方已附帶互動按鈕！`);
     } else {
-      alert("[部份失敗] Firebase 已更新，但 Telegram 發送出錯: " + JSON.stringify(tgData));
+      alert("[發送出錯]: " + JSON.stringify(tgData));
     }
   })
   .catch(err => {
     btn.innerText = originalText;
     btn.disabled = false;
-    alert("[錯誤] 同步失敗: " + err);
+    alert("[錯誤]: " + err);
   });
 }
 </script>
