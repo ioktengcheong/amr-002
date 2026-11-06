@@ -1,162 +1,164 @@
-<!DOCTYPE html>  
-<html lang="zh-Hant">  
-<head>  
-  <meta charset="UTF-8">  
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">  
-  <title>AMR Terminal App - Telemetry & Tele Push</title>  
-  
-  <!-- Firebase SDKs -->  
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>  
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>  
-  
-  <style>  
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }  
-    body { background-color: #f3f4f6; padding: 16px; color: #1f2937; }  
-    .container { max-width: 600px; margin: 0 auto; }  
-      
-    .header-card {  
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);  
-      color: white;  
-      border-radius: 16px;  
-      padding: 20px;  
-      margin-bottom: 16px;  
-      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);  
-    }  
-    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }  
-    .header-title { font-size: 1.5rem; font-weight: 700; }  
-    .wh-badge { background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 8px; font-size: 0.875rem; font-weight: 600; }  
-    .subtitle { font-size: 0.875rem; opacity: 0.9; }  
-  
-    .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 16px; }  
-    h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: #4b5563; text-transform: uppercase; letter-spacing: 0.05em; }  
-      
-    select, button { width: 100%; padding: 14px; margin-bottom: 16px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem; }  
-    button { background-color: #2563eb; color: white; border: none; font-weight: 600; cursor: pointer; transition: background 0.2s; }  
-    button:hover { background-color: #1d4ed8; }  
-    button.btn-success { background-color: #16a34a; }  
-    button.btn-success:hover { background-color: #15803d; }  
-      
-    .status-box { background: #f0fdf4; border: 1px solid #bbf7d0; padding: 12px; border-radius: 8px; color: #166534; font-weight: 600; text-align: center; margin-bottom: 16px; }  
-  </style>  
-</head>  
-<body>  
-  
-<div class="container">  
-  
-  <!-- Header Section -->  
-  <div class="header-card">  
-    <div class="header-top">  
-      <div class="header-title">AMR Terminal App</div>  
-      <div class="wh-badge">WHS001</div>  
-    </div>  
-    <div class="subtitle">AutoXing API Spy, Firebase Sync & Telegram Push</div>  
-  </div>  
-  
-  <!-- Dispatcher Control -->  
-  <div class="card">  
-    <div class="status-box">  
-      🟢 AutoXing & Firebase 雙向監控中 (Active)  
-    </div>  
-  
-    <h2>選擇目標部門 (Destination)</h2>  
-    <select id="targetDeptSelect">  
-      <option value="RC Cafe">RC Cafe</option>  
-      <option value="Staff Canteen">Staff Canteen</option>  
-      <option value="Housekeeping">Housekeeping</option>  
-    </select>  
-  
-    <h2>溫層 / 貨品類別 (Goods Type)</h2>  
-    <select id="goodsTypeSelect">  
-      <option value="Chilled (冷藏貨)">Chilled (冷藏貨)</option>  
-      <option value="Ambient (常溫貨)">Ambient (常溫貨)</option>  
-      <option value="Frozen (冷凍貨)">Frozen (冷凍貨)</option>  
-    </select>  
-  
-    <button class="btn-success" onclick="triggerDispatchAndSync()">🚀 啟動任務 (同步 Firebase + Telegram 推播)</button>  
-  </div>  
-  
-</div>  
-  
-<script>  
-// ==================== 1. Firebase 實時資料庫設定 ====================  
-const firebaseConfig = {  
-  databaseURL: "https://amr-logistics-system-default-rtdb.asia-southeast1.firebasedatabase.app/"  
-};  
-if (!firebase.apps.length) {  
-  firebase.initializeApp(firebaseConfig);  
-}  
-const db = firebase.database();  
-  
-// ==================== 2. Telegram Bot 設定 ====================  
-const TELEGRAM_BOT_TOKEN = "9157691891:AAEAKmuToYTM1xu6K4ZNn7KbW6X7AFXql4g";  
-const DEPT_CHAT_IDS = {  
-  "RC Cafe": "-537615630",  
-  "Staff Canteen": "-537615630",  
-  "Housekeeping": "-537615630"  
-};  
-  
-/**  
- * 觸發任務：同時寫入 Firebase 實時狀態 + 發送 Telegram 手機通知  
- */  
-function triggerDispatchAndSync() {  
-  const targetDept = document.getElementById("targetDeptSelect").value;  
-  const goodsType = document.getElementById("goodsTypeSelect").value;  
-  const missionId = "MS-" + Math.floor(1000 + Math.random() * 9000);  
-  const nowStr = new Date().toLocaleTimeString();  
-  const origin = "Central Warehouse (WHS001)";  
-  
-  const btn = event.target;  
-  const originalText = btn.innerText;  
-  btn.innerText = "⏳ 正在處理同步與發送...";  
-  btn.disabled = true;  
-  
-  // A. 寫入 Firebase (供各部門 Terminal / Spy 畫面實時監控)  
-  const firebasePromise = db.ref('amr_missions/' + targetDept).set({  
-    status: 'ARRIVED',  
-    missionId: missionId,  
-    origin: origin + " [" + goodsType + "]",  
-    timeStr: nowStr  
-  });  
-  
-  // B. 發送 Telegram 訊息 (供部門員工手機直接彈出 Sound & Push Notification)  
-  const targetChatId = DEPT_CHAT_IDS[targetDept] || "-537615630";  
-  const messageText = `🚨 <b>【AMR 到貨提醒】</b>\n\n` +  
-                      `📍 <b>目標部門:</b> ${targetDept}\n` +  
-                      `📦 <b>任務編號:</b> ${missionId}\n` +  
-                      `🏬 <b>出發來源:</b> ${origin} (${goodsType})\n` +  
-                      `⏰ <b>出發時間:</b> ${nowStr}\n\n` +  
-                      `請部門相關人員儘速前往完成取貨作業！`;  
-  
-  const telegramPromise = fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {  
-    method: "POST",  
-    headers: { "Content-Type": "application/json" },  
-    body: JSON.stringify({  
-      chat_id: targetChatId,  
-      text: messageText,  
-      parse_mode: "HTML"  
-    })  
-  });  
-  
-  // 等待兩者處理完成  
-  Promise.all([firebasePromise, telegramPromise])  
-  .then(([_, tgRes]) => tgRes.json())  
-  .then(tgData => {  
-    btn.innerText = originalText;  
-    btn.disabled = false;  
-  
-    if (tgData.ok) {  
-      alert(`[成功] 任務 ${missionId} 已同步至 Firebase 數據庫，並成功推送至 [${targetDept}] Telegram 群組！`);  
-    } else {  
-      alert("[部份失敗] Firebase 已更新，但 Telegram 發送出錯: " + JSON.stringify(tgData));  
-    }  
-  })  
-  .catch(err => {  
-    btn.innerText = originalText;  
-    btn.disabled = false;  
-    alert("[錯誤] 同步失敗: " + err);  
-  });  
-}  
-</script>  
-  
-</body>  
-</html>  
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AMR Terminal App - Telemetry & Tele Push</title>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #f3f4f6; padding: 16px; color: #1f2937; }
+    .container { max-width: 600px; margin: 0 auto; }
+    
+    .header-card {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: white;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+    }
+    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .header-title { font-size: 1.5rem; font-weight: 700; }
+    .wh-badge { background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 8px; font-size: 0.875rem; font-weight: 600; }
+    .subtitle { font-size: 0.875rem; opacity: 0.9; }
+
+    .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 16px; }
+    h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: #4b5563; text-transform: uppercase; letter-spacing: 0.05em; }
+    
+    select, button { width: 100%; padding: 14px; margin-bottom: 16px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem; }
+    button { background-color: #2563eb; color: white; border: none; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background-color: #1d4ed8; }
+    button.btn-success { background-color: #16a34a; }
+    button.btn-success:hover { background-color: #15803d; }
+    
+    .status-box { background: #f0fdf4; border: 1px solid #bbf7d0; padding: 12px; border-radius: 8px; color: #166534; font-weight: 600; text-align: center; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header Section -->
+  <div class="header-card">
+    <div class="header-top">
+      <div class="header-title">AMR Terminal App</div>
+      <div class="wh-badge">WHS001</div>
+    </div>
+    <div class="subtitle">AutoXing API Spy, Firebase Sync & Telegram Push</div>
+  </div>
+
+  <!-- Dispatcher Control -->
+  <div class="card">
+    <div class="status-box">
+      🟢 AutoXing & Firebase 雙向監控中 (Active)
+    </div>
+
+    <h2>選擇目標部門 (Destination)</h2>
+    <select id="targetDeptSelect">
+      <option value="RC Cafe">RC Cafe</option>
+      <option value="Staff Canteen">Staff Canteen</option>
+      <option value="Housekeeping">Housekeeping</option>
+    </select>
+
+    <h2>溫層 / 貨品類別 (Goods Type)</h2>
+    <select id="goodsTypeSelect">
+      <option value="Chilled (冷藏貨)">Chilled (冷藏貨)</option>
+      <option value="Ambient (常溫貨)">Ambient (常溫貨)</option>
+      <option value="Frozen (冷凍貨)">Frozen (冷凍貨)</option>
+    </select>
+
+    <button class="btn-success" onclick="triggerDispatchAndSync()">🚀 啟動任務 (同步 Firebase + Telegram 推播)</button>
+  </div>
+
+</div>
+
+<script>
+// ==================== 1. Firebase 實時資料庫設定 ====================
+const firebaseConfig = {
+  databaseURL: "https://amr-logistics-system-default-rtdb.asia-southeast1.firebasedatabase.app/"
+};
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
+const db = firebase.database();
+
+// ==================== 2. Telegram Bot 設定 ====================
+const TELEGRAM_BOT_TOKEN = "9157691891:AAEAKmuToYTM1xu6K4ZNn7KbW6X7AFXql4g";
+
+// 各部門對應的 Telegram Group Chat ID (已更新為真實 ID)
+const DEPT_CHAT_IDS = {
+  "RC Cafe": "-5376156300",
+  "Staff Canteen": "-5376156300",
+  "Housekeeping": "-5376156300"
+};
+
+/**
+ * 觸發任務：同時寫入 Firebase 實時狀態 + 發送 Telegram 手機通知
+ */
+function triggerDispatchAndSync() {
+  const targetDept = document.getElementById("targetDeptSelect").value;
+  const goodsType = document.getElementById("goodsTypeSelect").value;
+  const missionId = "MS-" + Math.floor(1000 + Math.random() * 9000);
+  const nowStr = new Date().toLocaleTimeString();
+  const origin = "Central Warehouse (WHS001)";
+
+  const btn = event.target;
+  const originalText = btn.innerText;
+  btn.innerText = "⏳ 正在處理同步與發送...";
+  btn.disabled = true;
+
+  // A. 寫入 Firebase (供各部門 Terminal / Spy 畫面實時監控)
+  const firebasePromise = db.ref('amr_missions/' + targetDept).set({
+    status: 'ARRIVED',
+    missionId: missionId,
+    origin: origin + " [" + goodsType + "]",
+    timeStr: nowStr
+  });
+
+  // B. 發送 Telegram 訊息 (供部門員工手機直接彈出 Sound & Push Notification)
+  const targetChatId = DEPT_CHAT_IDS[targetDept] || "-5376156300";
+  const messageText = `🚨 <b>【AMR 到貨提醒】</b>\n\n` +
+                      `📍 <b>目標部門:</b> ${targetDept}\n` +
+                      `📦 <b>任務編號:</b> ${missionId}\n` +
+                      `🏬 <b>出發來源:</b> ${origin} (${goodsType})\n` +
+                      `⏰ <b>出發時間:</b> ${nowStr}\n\n` +
+                      `請部門相關人員儘速前往完成取貨作業！`;
+
+  const telegramPromise = fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: targetChatId,
+      text: messageText,
+      parse_mode: "HTML"
+    })
+  });
+
+  // 等待兩者處理完成
+  Promise.all([firebasePromise, telegramPromise])
+  .then(([_, tgRes]) => tgRes.json())
+  .then(tgData => {
+    btn.innerText = originalText;
+    btn.disabled = false;
+
+    if (tgData.ok) {
+      alert(`[成功] 任務 ${missionId} 已同步至 Firebase 數據庫，並成功推送至 [${targetDept}] Telegram 群組！`);
+    } else {
+      alert("[部份失敗] Firebase 已更新，但 Telegram 發送出錯: " + JSON.stringify(tgData));
+    }
+  })
+  .catch(err => {
+    btn.innerText = originalText;
+    btn.disabled = false;
+    alert("[錯誤] 同步失敗: " + err);
+  });
+}
+</script>
+
+</body>
+</html>
